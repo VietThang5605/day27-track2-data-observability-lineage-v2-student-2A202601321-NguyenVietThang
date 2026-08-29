@@ -6,6 +6,8 @@
 **Chi phí:** $0 — chạy local  
 **AI coding agent:** được phép và khuyến khích, nhưng phải verify output.
 
+**Học viên:** Nguyễn Việt Thắng — Mã sinh viên: 2A202601321
+
 ## 1. Scenario
 
 Bạn là **Data/AI Reliability Team** của một công ty e-commerce. Pipeline vẫn báo `SUCCESS`, nhưng CEO thấy revenue giảm bất thường và Support Agent trả policy refund cũ.
