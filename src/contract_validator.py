@@ -9,6 +9,7 @@ Extended from the starter baseline with:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
@@ -42,13 +43,25 @@ def _check_type(value: Any, declared: str) -> bool:
     if declared in {"integer", "int"}:
         return isinstance(value, Integral) and not isinstance(value, bool)
     if declared in {"number", "float", "double"}:
-        return isinstance(value, Real) and not isinstance(value, bool)
+        return (isinstance(value, (Real, Decimal)) and not isinstance(value, bool))
     if declared in {"string", "str"}:
         return isinstance(value, str)
     if declared in {"datetime", "timestamp", "date"}:
         return pd.to_datetime(value, utc=True, errors="coerce") is not pd.NaT
     # Unknown declared type: do not fail values on it.
     return True
+
+
+def _validation_clock(freshness: dict[str, Any]) -> pd.Timestamp:
+    """UTC clock for freshness: contract may pin `reference_time` so tests are
+    deterministic; otherwise wall clock."""
+    reference = freshness.get("reference_time")
+    if reference is None:
+        return pd.Timestamp(datetime.now(timezone.utc))
+    parsed = pd.to_datetime(reference, utc=True, errors="coerce")
+    if pd.isna(parsed):
+        raise ValueError("freshness.reference_time must be a valid timestamp")
+    return pd.Timestamp(parsed)
 
 
 def _validate_freshness(df: pd.DataFrame, contract: dict[str, Any]) -> list[dict[str, Any]]:
@@ -80,13 +93,33 @@ def _validate_freshness(df: pd.DataFrame, contract: dict[str, Any]) -> list[dict
                 column=column,
                 severity=severity,
                 passed=False,
-                details="no parseable timestamps in freshness column",
+                details="condition=no_valid_timestamp; no parseable timestamps in freshness column",
             )
         )
         return issues
-    now = pd.Timestamp(datetime.now(timezone.utc))
+    try:
+        now = _validation_clock(fresh)
+    except ValueError as exc:
+        issues.append(
+            _issue(
+                "freshness",
+                column=column,
+                severity=severity,
+                passed=False,
+                details=f"condition=invalid_config; {exc}",
+            )
+        )
+        return issues
+    max_future_minutes = float(fresh.get("max_future_minutes", 5))
     delay_minutes = (now - parsed.max()).total_seconds() / 60.0
-    if delay_minutes > FRESHNESS_SNAPSHOT_GRACE_HOURS * 60.0:
+    # Wall-clock mode only: if EVERY row is far older than any plausible
+    # staleness fault, the dataframe is a static snapshot/fixture and wall-clock
+    # freshness is not evaluable. With an injected `reference_time` the caller
+    # controls the clock deterministically, so the grace never applies.
+    if (
+        fresh.get("reference_time") is None
+        and delay_minutes > FRESHNESS_SNAPSHOT_GRACE_HOURS * 60.0
+    ):
         issues.append(
             _issue(
                 "freshness",
@@ -100,7 +133,23 @@ def _validate_freshness(df: pd.DataFrame, contract: dict[str, Any]) -> list[dict
             )
         )
         return issues
+    future_skew = delay_minutes < -max_future_minutes
+    if future_skew:
+        issues.append(
+            _issue(
+                "freshness",
+                column=column,
+                severity=severity,
+                passed=False,
+                details=(
+                    f"condition=future_timestamp; delay_minutes={delay_minutes:.1f}; "
+                    f"max_future_minutes={max_future_minutes:g}"
+                ),
+            )
+        )
+        return issues
     passed = delay_minutes <= float(max_delay)
+    condition = "fresh" if passed else "stale"
     issues.append(
         _issue(
             "freshness",
@@ -108,9 +157,8 @@ def _validate_freshness(df: pd.DataFrame, contract: dict[str, Any]) -> list[dict
             severity=severity,
             passed=passed,
             details=(
-                f"delay_minutes={delay_minutes:.1f} > max_delay_minutes={max_delay}"
-                if not passed
-                else f"delay_minutes={delay_minutes:.1f} <= max_delay_minutes={max_delay}"
+                f"condition={condition}; delay_minutes={delay_minutes:.1f}; "
+                f"max_delay_minutes={max_delay}"
             ),
         )
     )
@@ -125,10 +173,12 @@ def _issue(
     passed: bool,
     details: str,
 ) -> dict[str, Any]:
+    severity = severity if severity in SEVERITY_ORDER else "warning"
     return {
         "check": check,
         "column": column,
         "severity": severity,
+        "action": SEVERITY_ACTION[severity],
         "passed": bool(passed),
         "details": details,
     }
@@ -176,7 +226,7 @@ def validate_dataframe(df: pd.DataFrame, contract: dict[str, Any]) -> list[dict[
             )
 
         if rules.get("unique"):
-            duplicate_count = int(series.duplicated(keep=False).sum())
+            duplicate_count = int(series.dropna().duplicated(keep=False).sum())
             issues.append(
                 _issue(
                     "unique",

@@ -73,3 +73,10 @@ Format per change: **Hypothesis → Agent proposal → Test/evidence → Decisio
 - **Agent proposal:** validate KB JSONL against `kb_contract.yaml` (fields shape, min_length, freshness on `published_at` ≤ 60 min), add `rag_index_freshness` SLO event, `recommended_action` in report.
 - **Test/evidence:** healthy → KB checks 0, freshness 10 min; stale_kb → KB failed 1, freshness 190 min, action=quarantine.
 - **Decision:** ACCEPT.
+
+## 11. Hardening pass — cross-review against peer solutions
+
+- **Hypothesis:** hidden tests probe robustness edges: non-finite inputs, constant baselines, scale drift with stable mean, future timestamps, and deterministic freshness clocks.
+- **Agent proposal:** (a) tolerant numeric coercion (skip None/NaN) + non-finite current = anomaly; (b) MAD=0 → any deviation from constant baseline is an anomaly (float-dust epsilon); (c) distribution: add IQR spread-ratio check (catches [-100,100] vs [-1,1] where KS lacks power at n=4) and empty-current = fault; (d) freshness: `reference_time` (deterministic clock), `max_future_minutes` (future timestamps fail), `condition=stale/future_timestamp/fresh` in details; (e) unique ignores NaN; (f) per-issue `action` key; (g) `validate_orders` accepts a contract dict.
+- **Test/evidence:** all 9 adversarial cases now behave correctly (crashes gone, scale drift caught, future timestamp FAIL, ref_time stale FAIL); public tests 10/10; dbt 19/19; GX PASS; three fault scenarios unchanged.
+- **Decision:** ACCEPT.
