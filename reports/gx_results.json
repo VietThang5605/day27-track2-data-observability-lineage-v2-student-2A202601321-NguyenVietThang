@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-08-29T05:16:49.472764+00:00",
+  "checkpoint": "orders_critical_checkpoint",
+  "success": true,
+  "statistics": {
+    "evaluated_expectations": 8,
+    "successful_expectations": 8,
+    "unsuccessful_expectations": 0,
+    "success_percent": 100.0
+  },
+  "failed_expectations": []
+}

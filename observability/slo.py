@@ -35,17 +35,51 @@ def evaluate_multiwindow_burn(
     *,
     short_window_burn: float,
     long_window_burn: float,
-    policy: str = "starter",
+    policy: str = "sre-multiwindow",
 ) -> dict[str, Any]:
-    """TODO(student): implement a real multi-window burn-rate policy.
+    """Multi-window, multi-burn-rate alert policy (Google SRE Workbook).
 
-    Starter intentionally never pages. Hidden evaluation contains cases that
-    require distinguishing sustained fast burn from a transient spike.
+    `short_window_burn` is the fast/recent window; `long_window_burn` is the
+    slow/sustained window. A page requires BOTH windows to burn: a transient
+    spike (high short, low long) must not page, and a slow sustained leak
+    (low short, high long) should open a ticket without paging.
+
+    Thresholds follow the canonical SRE recommendation (14.4x/6x for fast
+    burn, 6x/1x for slow burn), adapted to two windows.
     """
+    if short_window_burn < 0 or long_window_burn < 0:
+        raise ValueError("burn rates must be non-negative")
+
+    if short_window_burn > 14.4 and long_window_burn > 6.0:
+        page, severity = True, "critical"
+        reason = (
+            f"fast sustained burn: short={short_window_burn:.2f}x (>14.4) "
+            f"and long={long_window_burn:.2f}x (>6)"
+        )
+    elif short_window_burn > 6.0 and long_window_burn > 6.0:
+        page, severity = True, "critical"
+        reason = (
+            f"sustained burn: short={short_window_burn:.2f}x (>6) "
+            f"and long={long_window_burn:.2f}x (>6)"
+        )
+    elif long_window_burn > 1.0:
+        page, severity = False, "warning"
+        reason = (
+            f"slow sustained burn: long={long_window_burn:.2f}x (>1) with "
+            f"short={short_window_burn:.2f}x — open ticket, do not page"
+        )
+    else:
+        page, severity = False, "info"
+        reason = (
+            f"no significant burn: short={short_window_burn:.2f}x, "
+            f"long={long_window_burn:.2f}x (transient spike or healthy)"
+        )
+
     return {
-        "page": False,
-        "severity": "info",
-        "reason": "starter_policy_not_implemented",
+        "page": page,
+        "severity": severity,
+        "reason": reason,
         "short_window_burn": short_window_burn,
         "long_window_burn": long_window_burn,
+        "policy": "sre-multiwindow",
     }
